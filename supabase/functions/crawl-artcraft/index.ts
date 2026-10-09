@@ -328,8 +328,8 @@ Deno.serve(async (req) => {
       errors === 0
         ? "success"
         : errors < (apps?.length ?? 0)
-        ? "partial"
-        : "failed";
+          ? "partial"
+          : "failed";
 
     await db
       .from("crawl_runs")
