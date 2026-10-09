@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check Edge Function formatting
+        run: deno fmt --check supabase/functions
+
+      - name: Type-check Edge Function
+        run: deno check supabase/functions/crawl-artcraft/index.ts
+
+      - name: Validate migration filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          test "${#files[@]}" -gt 0
+          printf '%s\n' "${files[@]}" | grep -Eq '^[0-9]{14}_.+\.sql$'
+          versions="$(printf '%s\n' "${files[@]}" | cut -c1-14)"
+          test "$(printf '%s\n' "$versions" | sort -u | wc -l)" -eq "${#files[@]}"
+
+      - name: Reject deployment-specific Supabase project IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'project_id[[:space:]]*=' supabase README.md SECURITY.md; then
+            echo "Deployment-specific Supabase project_id must not be committed."
+            exit 1
+          fi

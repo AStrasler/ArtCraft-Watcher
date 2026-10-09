@@ -103,7 +103,17 @@ Stores deployment-specific runtime configuration such as:
 - local schedule hours
 - enabled state
 
+The row is validated before insert/update. Invalid IANA timezones, duplicate/out-of-range schedule hours, and malformed crawler URLs are rejected.
+
 This table is intentionally not seeded with a live deployment URL.
+
+### `notification_state`
+
+Stores the downstream notification cursor and health-alert checkpoint so a notifier can process each watcher event exactly once without repeatedly resurfacing routine changes.
+
+### `watcher_lock`
+
+Stores a short-lived crawl lease. The Edge Function acquires the lease before crawling and releases it afterward, preventing scheduled and manual runs from overlapping. Expired leases can be recovered automatically.
 
 ## Deployment
 
@@ -225,9 +235,31 @@ from cron.job
 where jobname = 'artcraft-watcher-hourly-dispatch';
 ```
 
+## Operational reliability
+
+The watcher includes several safeguards for unattended operation:
+
+- **overlap protection** — only one crawler execution can hold the watcher lease at a time
+- **silent first baseline** — a fresh deployment stores the current release/commit state without treating every existing upstream value as a new event
+- **retry/backoff** — transient GitHub 429, 5xx, and rate-limit responses are retried with bounded backoff
+- **settings validation** — invalid timezones, schedule hours, and crawler URLs are rejected
+- **retention** — crawl execution history is kept for 90 days and PostgreSQL Cron run history for 30 days
+- **exact-once notification cursor** — `notification_state` lets downstream consumers advance past every evaluated event, including events that do not merit a notification
+- **health detection** — a downstream notifier can alert when an expected scheduled crawl is missing, partial, failed, or reports errors
+
+The retention task runs independently of the crawler and does not delete `update_events`.
+
 ## Notifications
 
-Notifications are deliberately outside the crawler core. Any downstream service can read completed `crawl_runs` and new `update_events` and decide whether to notify.
+Notifications are deliberately outside the crawler core. Any downstream service can read completed `crawl_runs`, new `update_events`, and `notification_state` and decide whether to notify.
+
+A well-behaved notifier should:
+
+1. read events with an ID greater than `notification_state.last_event_id`;
+2. evaluate all of them, even if some are intentionally silent;
+3. advance the cursor to the highest evaluated event ID;
+4. check the expected scheduled crawl for health failures;
+5. deduplicate health alerts with `last_health_alert_key`.
 
 This keeps the watcher deterministic and prevents notification-provider credentials from being coupled to the crawler.
 
@@ -260,6 +292,13 @@ The current implementation:
 - runs independently through Supabase Cron
 - supports operator-controlled schedules and timezones
 - keeps runtime deployment details out of the public repository
+- prevents overlapping crawler executions
+- retries transient upstream failures with bounded backoff
+- silently establishes the initial baseline on a fresh deployment
+- validates runtime schedule configuration
+- retains crawl history for 90 days and Cron history for 30 days
+- exposes exact-once notification and health-alert state for downstream consumers
+- runs repository CI for Edge Function formatting/type checks and migration hygiene
 
 A downstream notification layer may classify changes as **Update**, **Hold**, or **No Action**, but that policy is intentionally separate from the crawler.
 
