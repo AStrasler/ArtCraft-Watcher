@@ -1,0 +1,2 @@
+[functions.crawl-artcraft]
+verify_jwt = false
