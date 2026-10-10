@@ -39,7 +39,9 @@ begin
   select net.http_post(
     url := function_url,
     headers := jsonb_build_object('Content-Type', 'application/json', 'x-artcraft-cron', cron_secret),
-    body := jsonb_build_object('source', p_source, 'tick_utc', p_tick, 'requested_at', now()),
+    body := jsonb_build_object('source', p_source, 'tick_utc', case when p_tick is null then null
+      else to_char(p_tick at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+      end, 'requested_at', now()),
     timeout_milliseconds := 10000
   ) into request_id;
   if request_id is null then raise exception 'HTTP dispatch was not queued'; end if;

@@ -5,6 +5,7 @@ create role authenticated nologin;
 create role service_role nologin;
 
 \ir ../../supabase/migrations/20261009071051_artcraft_watcher.sql
+\ir ../../supabase/migrations/20261010084500_validate_watcher_data.sql
 \ir ../../supabase/migrations/20261010085000_app_failure_tracking.sql
 \ir ../../supabase/migrations/20261010090000_atomic_crawl_app_update.sql
 
@@ -57,6 +58,33 @@ $$;
 \ir ../../supabase/migrations/20261010093500_claim_scheduled_ticks.sql
 \ir ../../supabase/migrations/20261010094000_health_and_recovery.sql
 \ir ../../supabase/migrations/20261010094500_health_alert_events.sql
+
+-- pg_cron fixture validates new named health schedule without installing an extension.
+create schema cron;
+create table cron.job (
+  jobid bigint generated always as identity primary key,
+  jobname text unique not null, schedule text, command text, active boolean not null default true
+);
+create function cron.schedule(job_name text, schedule_text text, command_text text)
+returns bigint language plpgsql as $$
+declare new_id bigint;
+begin
+  insert into cron.job(jobname,schedule,command)
+  values(job_name,schedule_text,command_text)
+  on conflict(jobname) do update
+    set schedule=excluded.schedule,command=excluded.command
+  returning jobid into new_id;
+  return new_id;
+end;
+$$;
+\ir ../../supabase/migrations/20261010095000_schedule_health_cron.sql
+do $$
+begin
+  if not exists(select 1 from cron.job
+    where jobname='artcraft-watcher-health-hourly' and schedule='15 * * * *')
+  then raise exception 'Health cron schedule was not created'; end if;
+end;
+$$;
 
 do $$
 declare
@@ -136,6 +164,8 @@ begin
      or (select last_error from public.craft_apps where id=v_app_id) is not null
   then raise exception 'Successful observation did not reset failure streak'; end if;
 
+  -- Test UTC tick serialization even when the invoking SQL session is non-UTC.
+  perform set_config('TimeZone','America/Los_Angeles',true);
   -- Scheduled dispatch is recorded once, whereas manual dispatch is separate.
   select public.dispatch_artcraft_tick(tick) into first_request;
   select public.dispatch_artcraft_tick(tick) into other_request;
@@ -147,6 +177,8 @@ begin
   end if;
   if (select body->>'source' from net.queued where id=first_request) <> 'supabase-cron'
   then raise exception 'Scheduled origin not identified'; end if;
+  if (select body->>'tick_utc' from net.queued where id=first_request) !~ 'Z$'
+  then raise exception 'Scheduled tick is not normalized to UTC'; end if;
   select public.invoke_artcraft_crawl() into other_request;
   if (select body->>'source' from net.queued where id=other_request) <> 'manual'
   then raise exception 'Manual origin not identified'; end if;

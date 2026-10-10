@@ -45,7 +45,8 @@ function optionalDate(value: unknown): string | null {
 export function parseRelease(value: unknown): ReleaseInfo | null {
   if (value === null) return null; // /releases/latest legitimately returns 404 without releases.
   const raw = object(value);
-  if (!raw || typeof raw.tag_name !== "string" || !raw.tag_name.trim()) {
+  if (!raw || typeof raw.tag_name !== "string" || !raw.tag_name.trim() ||
+    raw.tag_name.length > 256) {
     throw new Error("Invalid GitHub payload release");
   }
   return {
@@ -97,6 +98,9 @@ export function parseCrawlRequest(value: unknown): {
   tickUtc: string | null;
   appSlug: string | null;
 } {
+  if (value !== undefined && value !== null && !object(value)) {
+    throw new Error("Invalid crawl request");
+  }
   const request = object(value) ?? {};
   const source = request.source === undefined ? "manual" : request.source;
   if (source !== "manual" && source !== "supabase-cron") {

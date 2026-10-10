@@ -9,7 +9,7 @@ as $$
 declare
   response jsonb;
 begin
-  if p_stale_minutes < 60 or p_stale_minutes > 10080 then
+  if p_stale_minutes is null or p_stale_minutes < 60 or p_stale_minutes > 10080 then
     raise exception 'Invalid freshness threshold';
   end if;
 
