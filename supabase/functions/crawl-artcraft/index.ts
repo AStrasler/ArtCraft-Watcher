@@ -1,6 +1,13 @@
 // deno-lint-ignore no-unversioned-import -- Supabase runtime-provided type declaration.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  classifyCrawlError,
+  eventSummary,
+  parseCommit,
+  parseCrawlRequest,
+  parseRelease,
+} from "./crawler-helpers.ts";
 
 type AppRow = {
   id: number;
@@ -47,7 +54,7 @@ function retryDelayMs(res: Response, attempt: number) {
   return Math.min(500 * 2 ** attempt, 4_000);
 }
 
-async function githubJson(url: string) {
+async function githubJson(url: string, allowNotFound = false) {
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
     "user-agent": "ArtCraft-Watcher/1.0",
@@ -62,14 +69,17 @@ async function githubJson(url: string) {
     try {
       res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
     } catch (error) {
-      if (attempt < 3 && (error instanceof DOMException && error.name === "TimeoutError")) {
+      if (attempt < 3 && (
+        (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) ||
+        error instanceof TypeError
+      )) {
         await sleep(Math.min(500 * 2 ** attempt, 4_000));
         continue;
       }
       throw error;
     }
 
-    if (res.status === 404) return null;
+    if (res.status === 404 && allowNotFound) return null;
     if (res.ok) return await res.json();
 
     const remaining = res.headers.get("x-ratelimit-remaining");
@@ -83,10 +93,7 @@ async function githubJson(url: string) {
       continue;
     }
 
-    const body = await res.text();
-    throw new Error(
-      `GitHub ${res.status}: ${body.slice(0, 300)}`
-    );
+    throw new Error(`GitHub HTTP ${res.status}`);
   }
 
   throw new Error("GitHub request retry budget exhausted");
@@ -144,6 +151,16 @@ Deno.serve(async (req) => {
     });
   }
 
+  let crawlRequest: ReturnType<typeof parseCrawlRequest>;
+  try {
+    const body = await req.text();
+    crawlRequest = parseCrawlRequest(body.trim() ? JSON.parse(body) : {});
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid crawl request" }), {
+      status: 400, headers: jsonHeaders,
+    });
+  }
+
   const lockOwner = crypto.randomUUID();
   const { data: lockAcquired, error: lockError } = await db.rpc(
     "try_acquire_watcher_lock",
@@ -170,6 +187,18 @@ Deno.serve(async (req) => {
 
   let activeRunId: number | null = null;
   try {
+    if (crawlRequest.tickUtc !== null) {
+      const { data: claimed, error: claimError } = await db.rpc(
+        "claim_artcraft_tick",
+        { p_tick: crawlRequest.tickUtc, p_lock_owner: lockOwner },
+      );
+      if (claimError) throw claimError;
+      if (!claimed) {
+        return new Response(JSON.stringify({
+          status: "skipped", reason: "scheduled tick already claimed",
+        }), { status: 200, headers: jsonHeaders });
+      }
+    }
     const { data: recovered, error: recoveryError } = await db.rpc(
       "recover_stale_artcraft_runs",
       { p_lock_owner: lockOwner, p_min_age_seconds: 600 },
@@ -190,47 +219,45 @@ Deno.serve(async (req) => {
     }
 
     activeRunId = run.id;
+    if (crawlRequest.tickUtc !== null) {
+      const { error: linkError } = await db.rpc("link_artcraft_tick_run", {
+        p_tick: crawlRequest.tickUtc,
+        p_lock_owner: lockOwner,
+        p_run_id: run.id,
+      });
+      if (linkError) throw linkError;
+    }
 
-    const { data: apps, error: appsError } = await db
-      .from("craft_apps")
+    let appQuery = db.from("craft_apps")
       .select(
         "id,slug,display_name,repo_owner,repo_name,default_branch,installed_version,latest_release_tag,latest_commit_sha",
-      )
-      .eq("enabled", true)
+      ).eq("enabled", true);
+    if (crawlRequest.appSlug !== null) {
+      appQuery = appQuery.eq("slug", crawlRequest.appSlug);
+    }
+    const { data: apps, error: appsError } = await appQuery
       .order("display_name");
 
-    if (appsError) {
-      await db
-        .from("crawl_runs")
-        .update({
-          status: "failed",
-          finished_at: new Date().toISOString(),
-          error_count: 1,
-          details: { error: "Could not load app configuration" },
-        })
-        .eq("id", run.id);
-
-      return new Response(
-        JSON.stringify({ error: "Could not load app configuration" }),
-        { status: 500, headers: jsonHeaders },
-      );
-    }
+    if (appsError) throw new Error("Could not load app configuration");
 
     let changes = 0;
     let errors = 0;
     const results: unknown[] = [];
 
     for (const app of (apps ?? []) as AppRow[]) {
+      const appStarted = Date.now();
       try {
         const base =
           `https://api.github.com/repos/${app.repo_owner}/${app.repo_name}`;
 
-        const [release, commit] = await Promise.all([
-          githubJson(`${base}/releases/latest`),
+        const [releaseRaw, commitRaw] = await Promise.all([
+          githubJson(`${base}/releases/latest`, true),
           githubJson(
             `${base}/commits/${encodeURIComponent(app.default_branch)}`,
           ),
         ]);
+        const release = parseRelease(releaseRaw);
+        const commit = parseCommit(commitRaw);
 
         const patch: Record<string, unknown> = {
           last_checked_at: new Date().toISOString(),
@@ -272,13 +299,10 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (commit?.sha) {
-          const commitSha = String(commit.sha);
-          const message = commit.commit?.message?.split("\n")[0] ?? null;
-          const commitAt =
-            commit.commit?.committer?.date ??
-            commit.commit?.author?.date ??
-            null;
+        if (commit.sha) {
+          const commitSha = commit.sha;
+          const message = commit.message;
+          const commitAt = commit.committed_at;
 
           patch.latest_commit_sha = commitSha;
           patch.latest_commit_url = commit.html_url ?? null;
@@ -317,9 +341,11 @@ Deno.serve(async (req) => {
           throw new Error("Unexpected atomic persistence result");
         }
         changes += insertedCount;
-        const appChanges = insertedCount === candidateEvents.length
-          ? candidateLabels
-          : [`${insertedCount} new of ${candidateEvents.length} candidate events`];
+        const appChanges = eventSummary(insertedCount, candidateLabels);
+        console.info(JSON.stringify({
+          event: "app_checked", run_id: run.id, app_slug: app.slug,
+          duration_ms: Date.now() - appStarted, changes: insertedCount,
+        }));
 
         results.push({
           app: app.display_name,
@@ -328,10 +354,21 @@ Deno.serve(async (req) => {
         });
       } catch (error) {
         errors++;
+        const code = classifyCrawlError(error);
+        const { data: failures, error: trackingError } = await db.rpc(
+          "record_artcraft_app_failure",
+          { p_app_id: app.id, p_run_id: run.id, p_error_code: code },
+        );
+        if (trackingError) console.error("Failure tracking unavailable", app.slug);
+        console.warn(JSON.stringify({
+          event: "app_failed", run_id: run.id, app_slug: app.slug,
+          error_code: code, duration_ms: Date.now() - appStarted,
+          consecutive_failures: failures ?? null,
+          repeated_failure: typeof failures === "number" && failures >= 3,
+        }));
         results.push({
-          app: app.display_name,
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
+          app: app.display_name, ok: false, error_code: code,
+          consecutive_failures: failures ?? null,
         });
       }
     }
@@ -373,7 +410,7 @@ Deno.serve(async (req) => {
       { headers: jsonHeaders },
     );
   } catch (error) {
-    console.error("Crawler failed unexpectedly", error);
+    console.error("Crawler failed unexpectedly", classifyCrawlError(error));
     if (activeRunId !== null) {
       const { error: finalizationError } = await db.from("crawl_runs")
         .update({

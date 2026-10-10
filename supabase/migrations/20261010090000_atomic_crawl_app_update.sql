@@ -24,8 +24,8 @@ begin
   -- Serialize concurrent updates for this app.
   perform 1 from public.craft_apps where id = p_app_id for update;
   if not found then raise exception 'Unknown app id %', p_app_id; end if;
-  perform 1 from public.crawl_runs where id = p_run_id;
-  if not found then raise exception 'Unknown run id %', p_run_id; end if;
+  perform 1 from public.crawl_runs where id = p_run_id and status = 'running';
+  if not found then raise exception 'Unknown or finalized run id %', p_run_id; end if;
 
   for item in select value from jsonb_array_elements(p_events) loop
     if item->>'event_type' not in ('release', 'commit')
@@ -52,6 +52,7 @@ begin
     latest_commit_url = case when p_patch ? 'latest_commit_url' then (p_patch->>'latest_commit_url') else latest_commit_url end,
     latest_commit_message = case when p_patch ? 'latest_commit_message' then (p_patch->>'latest_commit_message') else latest_commit_message end,
     latest_commit_at = case when p_patch ? 'latest_commit_at' then (p_patch->>'latest_commit_at')::timestamptz else latest_commit_at end,
+    consecutive_failures = 0, last_failure_at = null, last_error = null,
     last_checked_at = now(), updated_at = now()
   where id = p_app_id;
 
