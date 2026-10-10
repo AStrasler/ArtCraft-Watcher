@@ -175,7 +175,7 @@ end;
 $$;
 
 -- Fall-back DST repeats 01:00 local time, but it must dispatch only once.
-do $
+do $$
 declare
   first_id bigint;
   second_id bigint;
@@ -202,7 +202,7 @@ begin
     raise exception 'Health RPC is readable by anon';
   end if;
 end;
-$;
+$$;
 
 -- Recovery is locked, bounded by age, and idempotent.
 do $$
@@ -230,7 +230,7 @@ end;
 $$;
 
 -- Health checks persist active conditions, deduplicate, and resolve on recovery.
-do $
+do $$
 declare
   response jsonb;
   first_count integer;
@@ -256,6 +256,6 @@ begin
     raise exception 'Health alerts are exposed publicly';
   end if;
 end;
-$;
+$$;
 
 select 'Atomic, duplicate, rollback, null, failure, dispatch, claim, permission and stale recovery tests passed' as result;
