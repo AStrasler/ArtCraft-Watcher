@@ -1,0 +1,44 @@
+{
+  "designcraft": {
+    "sha256": "7dc8e40a18395b31c2b8a2a7c9cf71c163fa97d99f38067ddcce53bea7c0d2b4",
+    "source": "https://github.com/storytold/designcraft/releases/download/v0.5.0/designcraft-0.5.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:15.005186+00:00",
+    "version": "v0.5.0"
+  },
+  "effectcraft": {
+    "sha256": "aa3aebe2fa97d9874e8afab0bff333e0733e368ab6871bca5c42c4a784749c7b",
+    "source": "https://github.com/storytold/effectcraft/releases/download/v0.7.0/effectcraft-0.7.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:17.222494+00:00",
+    "version": "v0.7.0"
+  },
+  "filmcraft": {
+    "sha256": "bcaf298733a997a4c016ad9a69e387429cdabd678dac017fe683b64760290a56",
+    "source": "https://github.com/storytold/filmcraft/releases/download/v0.5.0/filmcraft-0.5.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:19.409081+00:00",
+    "version": "v0.5.0"
+  },
+  "lightcraft": {
+    "sha256": "445e1d2897d561325d11eaba68f9a2df4a58e4974c9de49f4a3b03717b214858",
+    "source": "https://github.com/storytold/lightcraft/releases/download/v0.5.0/lightcraft-0.5.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:22.393617+00:00",
+    "version": "v0.5.0"
+  },
+  "pdfcraft": {
+    "sha256": "d47ce10f95a5e5208faaf73d6f042ae80f4db1681a6e4f8df822c98ff3f7f6e5",
+    "source": "https://github.com/storytold/pdfcraft/releases/download/v0.5.0/pdfcraft-0.5.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:24.836344+00:00",
+    "version": "v0.5.0"
+  },
+  "photocraft": {
+    "sha256": "3194467c6202fd355fdf61571069b4d01150ab8b9ad062f591be7339414a7201",
+    "source": "https://github.com/storytold/photocraft/releases/download/v0.6.0/photocraft-0.6.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:30.167455+00:00",
+    "version": "v0.6.0"
+  },
+  "vectorcraft": {
+    "sha256": "59895cb1954a690a8b7fbf929dfbfa159f118ee12155d4b2d60ef0bdcf41fb15",
+    "source": "https://github.com/storytold/vectorcraft/releases/download/v0.8.0/vectorcraft-0.8.0-windows-x64.msi",
+    "verified_at": "2026-10-10T08:21:32.684604+00:00",
+    "version": "v0.8.0"
+  }
+}
