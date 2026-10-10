@@ -1,3 +1,4 @@
+// deno-lint-ignore no-unversioned-import -- Supabase runtime-provided type declaration.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
