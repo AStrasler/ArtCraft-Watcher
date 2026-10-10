@@ -57,7 +57,16 @@ async function githubJson(url: string) {
   if (token) headers.authorization = `Bearer ${token}`;
 
   for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch(url, { headers });
+    let res: Response;
+    try {
+      res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+    } catch (error) {
+      if (attempt < 3 && (error instanceof DOMException && error.name === "TimeoutError")) {
+        await sleep(Math.min(500 * 2 ** attempt, 4_000));
+        continue;
+      }
+      throw error;
+    }
 
     if (res.status === 404) return null;
     if (res.ok) return await res.json();
@@ -83,7 +92,7 @@ async function githubJson(url: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST" && req.method !== "GET") {
+  if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
       headers: jsonHeaders,
