@@ -20,6 +20,12 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Lint Edge Function
+        run: deno lint supabase/functions/crawl-artcraft/index.ts
+
+      - name: Test Edge Function
+        run: deno test --allow-read supabase/functions/crawl-artcraft
+
       - name: Type-check Edge Function
         run: deno check supabase/functions/crawl-artcraft/index.ts
 
