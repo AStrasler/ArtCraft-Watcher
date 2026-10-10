@@ -170,6 +170,12 @@ Deno.serve(async (req) => {
 
   let activeRunId: number | null = null;
   try {
+    const { data: recovered, error: recoveryError } = await db.rpc(
+      "recover_stale_artcraft_runs",
+      { p_lock_owner: lockOwner, p_min_age_seconds: 600 },
+    );
+    if (recoveryError) throw recoveryError;
+    if (recovered > 0) console.warn("Recovered stale crawler runs", recovered);
     const { data: run, error: runError } = await db
       .from("crawl_runs")
       .insert({ status: "running" })
