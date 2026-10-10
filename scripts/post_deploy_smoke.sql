@@ -22,13 +22,16 @@ begin
       where singleton=true and enabled=true and edge_function_url is not null) then
     raise exception 'Watcher schedule is disabled or runtime URL is unset';
   end if;
+  -- The management API generates its own migration versions; compare stable names.
   select count(*) into missing_count from (values
-      ('20261010084500'), ('20261010085000'), ('20261010090000'),
-      ('20261010091500'), ('20261010093000'), ('20261010093500'),
-      ('20261010094000'), ('20261010094500'), ('20261010095000')
-    ) as expected(version)
+      ('validate_watcher_data'), ('app_failure_tracking'),
+      ('atomic_crawl_app_update'), ('recover_stale_crawl_runs'),
+      ('dispatch_idempotency'), ('claim_scheduled_ticks'),
+      ('health_and_recovery'), ('health_alert_events'),
+      ('schedule_health_cron')
+    ) as expected(name)
     where not exists(select 1 from supabase_migrations.schema_migrations m
-                     where m.version=expected.version);
+                     where m.name=expected.name);
   if missing_count <> 0 then
     raise exception '% hardening migrations not applied',missing_count;
   end if;
