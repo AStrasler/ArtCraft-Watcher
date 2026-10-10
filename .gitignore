@@ -3,3 +3,5 @@
 .supabase/
 node_modules/
 .DS_Store
+installers/*.msi
+installers/manifest.json
