@@ -58,6 +58,7 @@ $$;
 \ir ../../supabase/migrations/20261010093500_claim_scheduled_ticks.sql
 \ir ../../supabase/migrations/20261010094000_health_and_recovery.sql
 \ir ../../supabase/migrations/20261010094500_health_alert_events.sql
+\ir ../../supabase/migrations/20261010095500_explicit_health_rls_denial.sql
 
 -- pg_cron fixture validates new named health schedule without installing an extension.
 create schema cron;

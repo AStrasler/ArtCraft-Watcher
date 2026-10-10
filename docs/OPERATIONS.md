@@ -32,6 +32,7 @@ Apply migrations strictly in filename order:
 7. `20261010094000_health_and_recovery.sql`.
 8. `20261010094500_health_alert_events.sql`.
 9. `20261010095000_schedule_health_cron.sql`.
+10. `20261010095500_explicit_health_rls_denial.sql`.
 
 Deploy the matching `crawl-artcraft` Edge Function only after the database changes
 succeed. **Do not** deploy the new function against the old schema: its new RPC calls

@@ -28,7 +28,7 @@ begin
       ('atomic_crawl_app_update'), ('recover_stale_crawl_runs'),
       ('dispatch_idempotency'), ('claim_scheduled_ticks'),
       ('health_and_recovery'), ('health_alert_events'),
-      ('schedule_health_cron')
+      ('schedule_health_cron'), ('explicit_health_rls_denial')
     ) as expected(name)
     where not exists(select 1 from supabase_migrations.schema_migrations m
                      where m.name=expected.name);
