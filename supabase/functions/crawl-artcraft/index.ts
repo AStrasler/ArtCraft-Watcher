@@ -229,7 +229,8 @@ Deno.serve(async (req) => {
           updated_at: new Date().toISOString(),
         };
 
-        const appChanges: string[] = [];
+        const candidateEvents: Record<string, unknown>[] = [];
+        const candidateLabels: string[] = [];
 
         if (release) {
           const newTag = release.tag_name ?? null;
@@ -244,8 +245,7 @@ Deno.serve(async (req) => {
             newTag &&
             newTag !== app.latest_release_tag
           ) {
-            const { data: inserted, error } = await db.from("update_events").upsert(
-              {
+            candidateEvents.push({
                 app_id: app.id,
                 crawl_run_id: run.id,
                 event_type: "release",
@@ -259,18 +259,8 @@ Deno.serve(async (req) => {
                   installed_version: app.installed_version,
                   published_at: release.published_at ?? null,
                 },
-              },
-              {
-                onConflict: "app_id,event_type,new_value",
-                ignoreDuplicates: true,
-              },
-            ).select("id");
-
-            if (error) throw error;
-            if (insertedEventCount(inserted) > 0) {
-              changes++;
-              appChanges.push(`release:${newTag}`);
-            }
+              });
+            candidateLabels.push(`release:${newTag}`);
           }
         }
 
@@ -290,8 +280,7 @@ Deno.serve(async (req) => {
           const isBaseline = app.latest_commit_sha === null;
 
           if (!isBaseline && commitSha !== app.latest_commit_sha) {
-            const { data: inserted, error } = await db.from("update_events").upsert(
-              {
+            candidateEvents.push({
                 app_id: app.id,
                 crawl_run_id: run.id,
                 event_type: "commit",
@@ -300,27 +289,29 @@ Deno.serve(async (req) => {
                 title: message,
                 url: commit.html_url ?? null,
                 metadata: { committed_at: commitAt },
-              },
-              {
-                onConflict: "app_id,event_type,new_value",
-                ignoreDuplicates: true,
-              },
-            ).select("id");
-
-            if (error) throw error;
-            if (insertedEventCount(inserted) > 0) {
-              changes++;
-              appChanges.push(`commit:${commitSha.slice(0, 7)}`);
-            }
+              });
+            candidateLabels.push(`commit:${commitSha.slice(0, 7)}`);
           }
         }
 
-        const { error: updateError } = await db
-          .from("craft_apps")
-          .update(patch)
-          .eq("id", app.id);
-
-        if (updateError) throw updateError;
+        const { data: insertedCount, error: persistError } = await db.rpc(
+          "record_artcraft_app_result",
+          {
+            p_app_id: app.id,
+            p_run_id: run.id,
+            p_patch: patch,
+            p_events: candidateEvents,
+          },
+        );
+        if (persistError) throw persistError;
+        if (typeof insertedCount !== "number" || insertedCount < 0 ||
+          insertedCount > candidateEvents.length) {
+          throw new Error("Unexpected atomic persistence result");
+        }
+        changes += insertedCount;
+        const appChanges = insertedCount === candidateEvents.length
+          ? candidateLabels
+          : [`${insertedCount} new of ${candidateEvents.length} candidate events`];
 
         results.push({
           app: app.display_name,
