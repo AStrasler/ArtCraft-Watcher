@@ -243,7 +243,7 @@ Deno.serve(async (req) => {
             newTag &&
             newTag !== app.latest_release_tag
           ) {
-            const { error } = await db.from("update_events").upsert(
+            const { data: inserted, error } = await db.from("update_events").upsert(
               {
                 app_id: app.id,
                 crawl_run_id: run.id,
@@ -263,9 +263,10 @@ Deno.serve(async (req) => {
                 onConflict: "app_id,event_type,new_value",
                 ignoreDuplicates: true,
               },
-            );
+            ).select("id");
 
-            if (!error) {
+            if (error) throw error;
+            if ((inserted?.length ?? 0) > 0) {
               changes++;
               appChanges.push(`release:${newTag}`);
             }
@@ -288,7 +289,7 @@ Deno.serve(async (req) => {
           const isBaseline = app.latest_commit_sha === null;
 
           if (!isBaseline && commitSha !== app.latest_commit_sha) {
-            const { error } = await db.from("update_events").upsert(
+            const { data: inserted, error } = await db.from("update_events").upsert(
               {
                 app_id: app.id,
                 crawl_run_id: run.id,
@@ -303,9 +304,10 @@ Deno.serve(async (req) => {
                 onConflict: "app_id,event_type,new_value",
                 ignoreDuplicates: true,
               },
-            );
+            ).select("id");
 
-            if (!error) {
+            if (error) throw error;
+            if ((inserted?.length ?? 0) > 0) {
               changes++;
               appChanges.push(`commit:${commitSha.slice(0, 7)}`);
             }
