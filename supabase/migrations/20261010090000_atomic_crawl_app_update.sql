@@ -45,13 +45,13 @@ begin
   end loop;
 
   update public.craft_apps set
-    latest_release_tag = coalesce(p_patch->>'latest_release_tag', latest_release_tag),
-    latest_release_url = coalesce(p_patch->>'latest_release_url', latest_release_url),
-    latest_release_published_at = coalesce((p_patch->>'latest_release_published_at')::timestamptz, latest_release_published_at),
-    latest_commit_sha = coalesce(p_patch->>'latest_commit_sha', latest_commit_sha),
-    latest_commit_url = coalesce(p_patch->>'latest_commit_url', latest_commit_url),
-    latest_commit_message = coalesce(p_patch->>'latest_commit_message', latest_commit_message),
-    latest_commit_at = coalesce((p_patch->>'latest_commit_at')::timestamptz, latest_commit_at),
+    latest_release_tag = case when p_patch ? 'latest_release_tag' then (p_patch->>'latest_release_tag') else latest_release_tag end,
+    latest_release_url = case when p_patch ? 'latest_release_url' then (p_patch->>'latest_release_url') else latest_release_url end,
+    latest_release_published_at = case when p_patch ? 'latest_release_published_at' then (p_patch->>'latest_release_published_at')::timestamptz else latest_release_published_at end,
+    latest_commit_sha = case when p_patch ? 'latest_commit_sha' then (p_patch->>'latest_commit_sha') else latest_commit_sha end,
+    latest_commit_url = case when p_patch ? 'latest_commit_url' then (p_patch->>'latest_commit_url') else latest_commit_url end,
+    latest_commit_message = case when p_patch ? 'latest_commit_message' then (p_patch->>'latest_commit_message') else latest_commit_message end,
+    latest_commit_at = case when p_patch ? 'latest_commit_at' then (p_patch->>'latest_commit_at')::timestamptz else latest_commit_at end,
     last_checked_at = now(), updated_at = now()
   where id = p_app_id;
 

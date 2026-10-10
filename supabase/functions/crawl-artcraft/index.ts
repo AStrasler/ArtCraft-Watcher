@@ -168,6 +168,7 @@ Deno.serve(async (req) => {
     );
   }
 
+  let activeRunId: number | null = null;
   try {
     const { data: run, error: runError } = await db
       .from("crawl_runs")
@@ -181,6 +182,8 @@ Deno.serve(async (req) => {
         { status: 500, headers: jsonHeaders },
       );
     }
+
+    activeRunId = run.id;
 
     const { data: apps, error: appsError } = await db
       .from("craft_apps")
@@ -334,7 +337,7 @@ Deno.serve(async (req) => {
           ? "partial"
           : "failed";
 
-    await db
+    const { error: finishError } = await db
       .from("crawl_runs")
       .update({
         status,
@@ -345,6 +348,8 @@ Deno.serve(async (req) => {
         details: { results },
       })
       .eq("id", run.id);
+    if (finishError) throw finishError;
+    activeRunId = null;
 
     return new Response(
       JSON.stringify(
@@ -361,6 +366,22 @@ Deno.serve(async (req) => {
       ),
       { headers: jsonHeaders },
     );
+  } catch (error) {
+    console.error("Crawler failed unexpectedly", error);
+    if (activeRunId !== null) {
+      const { error: finalizationError } = await db.from("crawl_runs")
+        .update({
+          status: "failed",
+          finished_at: new Date().toISOString(),
+          error_count: 1,
+          details: { error: "Unexpected crawler failure" },
+        }).eq("id", activeRunId);
+      if (finalizationError) console.error("Could not finalize failed crawl", finalizationError);
+    }
+    return new Response(JSON.stringify({ error: "Crawler execution failed" }), {
+      status: 500,
+      headers: jsonHeaders,
+    });
   } finally {
     const { error } = await db.rpc("release_watcher_lock", {
       p_owner: lockOwner,
