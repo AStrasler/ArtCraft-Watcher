@@ -1,6 +1,7 @@
 // deno-lint-ignore no-unversioned-import -- Supabase runtime-provided type declaration.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { githubJson } from "./github-client.ts";
 import {
   classifyCrawlError,
   eventSummary,
@@ -22,8 +23,6 @@ type AppRow = {
 };
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 async function sha256Hex(value: string) {
   const data = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -37,66 +36,6 @@ function constantTimeEqual(a: string, b: string) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
-}
-
-function retryDelayMs(res: Response, attempt: number) {
-  const retryAfter = res.headers.get("retry-after");
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds)) return Math.min(seconds * 1000, 10_000);
-  }
-
-  const reset = Number(res.headers.get("x-ratelimit-reset"));
-  if (Number.isFinite(reset) && reset > 0) {
-    return Math.min(Math.max(reset * 1000 - Date.now(), 500), 10_000);
-  }
-
-  return Math.min(500 * 2 ** attempt, 4_000);
-}
-
-async function githubJson(url: string, allowNotFound = false) {
-  const headers: Record<string, string> = {
-    accept: "application/vnd.github+json",
-    "user-agent": "ArtCraft-Watcher/1.0",
-    "x-github-api-version": "2022-11-28",
-  };
-
-  const token = Deno.env.get("GITHUB_TOKEN");
-  if (token) headers.authorization = `Bearer ${token}`;
-
-  for (let attempt = 0; attempt < 4; attempt++) {
-    let res: Response;
-    try {
-      res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
-    } catch (error) {
-      if (attempt < 3 && (
-        (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) ||
-        error instanceof TypeError
-      )) {
-        await sleep(Math.min(500 * 2 ** attempt, 4_000));
-        continue;
-      }
-      throw error;
-    }
-
-    if (res.status === 404 && allowNotFound) return null;
-    if (res.ok) return await res.json();
-
-    const remaining = res.headers.get("x-ratelimit-remaining");
-    const retryable =
-      res.status === 429 ||
-      res.status >= 500 ||
-      (res.status === 403 && remaining === "0");
-
-    if (retryable && attempt < 3) {
-      await sleep(retryDelayMs(res, attempt));
-      continue;
-    }
-
-    throw new Error(`GitHub HTTP ${res.status}`);
-  }
-
-  throw new Error("GitHub request retry budget exhausted");
 }
 
 Deno.serve(async (req) => {
@@ -242,9 +181,18 @@ Deno.serve(async (req) => {
 
     let changes = 0;
     let errors = 0;
+    let appsChecked = 0;
+    const crawlStarted = Date.now();
     const results: unknown[] = [];
 
     for (const app of (apps ?? []) as AppRow[]) {
+      // Keep the 300-second watcher lease valid during bounded GitHub retries.
+      if (Date.now() - crawlStarted > 200_000) {
+        errors++;
+        results.push({ app: app.display_name, ok: false, error_code: "crawl_budget_exhausted" });
+        continue;
+      }
+      appsChecked++;
       const appStarted = Date.now();
       try {
         const base =
@@ -385,7 +333,7 @@ Deno.serve(async (req) => {
       .update({
         status,
         finished_at: new Date().toISOString(),
-        apps_checked: apps?.length ?? 0,
+        apps_checked: appsChecked,
         changes_found: changes,
         error_count: errors,
         details: { results },
@@ -399,7 +347,7 @@ Deno.serve(async (req) => {
         {
           run_id: run.id,
           status,
-          apps_checked: apps?.length ?? 0,
+          apps_checked: appsChecked,
           changes_found: changes,
           error_count: errors,
           results,

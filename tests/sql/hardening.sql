@@ -55,6 +55,8 @@ end;
 $$;
 \ir ../../supabase/migrations/20261010093000_dispatch_idempotency.sql
 \ir ../../supabase/migrations/20261010093500_claim_scheduled_ticks.sql
+\ir ../../supabase/migrations/20261010094000_health_and_recovery.sql
+\ir ../../supabase/migrations/20261010094500_health_alert_events.sql
 
 do $$
 declare
@@ -172,6 +174,36 @@ begin
 end;
 $$;
 
+-- Fall-back DST repeats 01:00 local time, but it must dispatch only once.
+do $
+declare
+  first_id bigint;
+  second_id bigint;
+  first_tick timestamptz := '2026-11-01 06:00:00+00'::timestamptz;
+  second_tick timestamptz := '2026-11-01 07:00:00+00'::timestamptz;
+  summary jsonb;
+begin
+  update public.watcher_settings set timezone='America/Chicago' where singleton=true;
+  select public.dispatch_artcraft_tick(first_tick) into first_id;
+  select public.dispatch_artcraft_tick(second_tick) into second_id;
+  if first_id is null or second_id is not null then
+    raise exception 'Repeated local DST hour dispatched twice';
+  end if;
+  if (select count(*) from net.queued) <> 3 then
+    raise exception 'DST dispatch count incorrect';
+  end if;
+  select public.artcraft_watcher_health() into summary;
+  if summary is null or summary->'stale_apps' is null
+     or summary->'repeated_failure_apps' is null
+     or summary->'missed_dispatches' is null then
+    raise exception 'Operational health response incomplete';
+  end if;
+  if has_function_privilege('anon','public.artcraft_watcher_health(integer)','EXECUTE') then
+    raise exception 'Health RPC is readable by anon';
+  end if;
+end;
+$;
+
 -- Recovery is locked, bounded by age, and idempotent.
 do $$
 declare
@@ -196,5 +228,34 @@ begin
   then raise exception 'Recovery was not idempotent'; end if;
 end;
 $$;
+
+-- Health checks persist active conditions, deduplicate, and resolve on recovery.
+do $
+declare
+  response jsonb;
+  first_count integer;
+begin
+  select public.evaluate_artcraft_health() into response;
+  if (response->>'new_alerts')::integer < 1 then
+    raise exception 'No alert created for stale apps';
+  end if;
+  select occurrences into first_count
+    from public.watcher_health_alerts where alert_key='stale_apps';
+  perform public.evaluate_artcraft_health();
+  if (select occurrences from public.watcher_health_alerts where alert_key='stale_apps')
+      <> first_count + 1 then
+    raise exception 'Repeated health check did not update existing alert';
+  end if;
+  update public.craft_apps set last_checked_at=now(),consecutive_failures=0,last_error=null;
+  perform public.evaluate_artcraft_health();
+  if (select active from public.watcher_health_alerts where alert_key='stale_apps') then
+    raise exception 'Recovered alert did not resolve';
+  end if;
+  if has_function_privilege('anon','public.evaluate_artcraft_health()','EXECUTE')
+     or has_table_privilege('authenticated','public.watcher_health_alerts','SELECT') then
+    raise exception 'Health alerts are exposed publicly';
+  end if;
+end;
+$;
 
 select 'Atomic, duplicate, rollback, null, failure, dispatch, claim, permission and stale recovery tests passed' as result;

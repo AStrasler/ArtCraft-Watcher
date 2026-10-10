@@ -1,6 +1,7 @@
 -- Unique UTC hourly tick prevents repeated scheduled HTTP dispatch.
 create table if not exists public.watcher_dispatches (
   tick_utc timestamptz primary key,
+  local_slot text not null unique,
   request_id bigint,
   queued_at timestamptz not null default now()
 );
@@ -59,13 +60,18 @@ grant execute on function public.invoke_artcraft_crawl() to postgres, service_ro
 create or replace function public.dispatch_artcraft_tick(p_tick timestamptz)
 returns bigint language plpgsql security definer set search_path = ''
 as $$
-declare queued_id bigint;
+declare
+  queued_id bigint;
+  local_key text;
 begin
   if p_tick is null or p_tick <> date_trunc('hour', p_tick) then
     raise exception 'Tick must be aligned to a UTC hour';
   end if;
   -- Duplicate ticks are safely ignored; the insert and HTTP queue run in one DB transaction.
-  insert into public.watcher_dispatches(tick_utc) values (p_tick)
+  select to_char(p_tick at time zone timezone, 'YYYY-MM-DD"T"HH24') || '@' || timezone
+    into local_key from public.watcher_settings where singleton = true;
+  if local_key is null then raise exception 'Watcher schedule is unavailable'; end if;
+  insert into public.watcher_dispatches(tick_utc,local_slot) values (p_tick,local_key)
   on conflict do nothing;
   if not found then return null; end if;
   queued_id := public.send_artcraft_crawl('supabase-cron', p_tick);

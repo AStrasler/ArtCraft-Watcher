@@ -41,6 +41,24 @@ optional downstream notifier
 
 The crawler is independent of any local workstation. A computer does not need to remain powered on for scheduled checks to run.
 
+## Reliability and operations
+
+The hardened crawler uses transactional event/state writes, event deduplication,
+bounded retries and runtime, per-app failure streaks, and recovery of abandoned
+runs. Scheduled dispatches use database idempotency keys, including the repeated
+local hour during daylight-saving time changes. Manual runs remain explicitly
+distinguishable from scheduled runs.
+
+A read-only health RPC, persisted alert states, and an hourly pg_cron health
+evaluation cover stale apps, failed runs, dispatch delivery gaps, repeated app
+errors, and unfinalized runs. **This repository records alerts but does not
+send SMS or email**; a separate notifier must be deliberately connected.
+
+CI includes Deno lint/type checks, mocked GitHub HTTP tests, and real PostgreSQL
+transaction tests in a disposable database. No paid external service is
+required. See [operations, deployment checks, and recovery](docs/OPERATIONS.md)
+for the approval-gated rollout and documented testing limitations.
+
 ## Security model
 
 The deployment is designed so the infrastructure stays under the operator's control even when this repository is public.
