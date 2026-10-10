@@ -1,6 +1,7 @@
 // deno-lint-ignore no-unversioned-import -- Supabase runtime-provided type declaration.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { insertedEventCount } from "./event-count.ts";
 
 type AppRow = {
   id: number;
@@ -266,7 +267,7 @@ Deno.serve(async (req) => {
             ).select("id");
 
             if (error) throw error;
-            if ((inserted?.length ?? 0) > 0) {
+            if (insertedEventCount(inserted) > 0) {
               changes++;
               appChanges.push(`release:${newTag}`);
             }
@@ -307,7 +308,7 @@ Deno.serve(async (req) => {
             ).select("id");
 
             if (error) throw error;
-            if ((inserted?.length ?? 0) > 0) {
+            if (insertedEventCount(inserted) > 0) {
               changes++;
               appChanges.push(`commit:${commitSha.slice(0, 7)}`);
             }
