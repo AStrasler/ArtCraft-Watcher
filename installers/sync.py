@@ -8,20 +8,69 @@ from pathlib import Path
 import re
 import tempfile
 from datetime import datetime, timezone
-from urllib.request import Request, urlopen
+from urllib.parse import unquote, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 APPS = ("designcraft", "effectcraft", "filmcraft", "lightcraft", "pdfcraft", "photocraft", "vectorcraft")
 API = "https://api.github.com/repos/storytold/{}/releases/latest"
 
-def fetch(url, token=None):
+def _allowed_github_url(url, app, asset=None, allow_asset_host=False):
+    if app not in APPS:
+        return False
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if parsed.scheme != "https" or parsed.username or parsed.password or port not in (None, 443):
+        return False
+    if parsed.fragment:
+        return False
+    if parsed.hostname == "api.github.com":
+        return asset is None and parsed.path == f"/repos/storytold/{app}/releases/latest"
+    if parsed.hostname == "github.com":
+        parts = parsed.path.split("/")
+        return (
+            asset is not None
+            and len(parts) == 7
+            and parts[1:4] == ["storytold", app, "releases"]
+            and parts[4] == "download"
+            and bool(parts[5])
+            and unquote(parts[6]) == asset
+        )
+    if allow_asset_host and parsed.hostname == "release-assets.githubusercontent.com":
+        return asset is not None and ".." not in parsed.path.split("/")
+    return False
+
+
+class GitHubRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, app, asset):
+        super().__init__()
+        self.app = app
+        self.asset = asset
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _allowed_github_url(newurl, self.app, self.asset, allow_asset_host=True):
+            raise RuntimeError("GitHub redirect left the approved release hosts")
+        safe_headers = {
+            key: value for key, value in req.headers.items()
+            if key.lower() != "authorization"
+        }
+        return Request(newurl, headers=safe_headers, method="GET")
+
+
+def fetch(url, app, token=None, asset=None):
+    if not _allowed_github_url(url, app, asset):
+        raise ValueError("Refusing a non-GitHub release URL")
     headers = {"User-Agent": "ArtCraft-Watcher-Installer-Archive", "Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = "Bearer " + token
-    return urlopen(Request(url, headers=headers), timeout=90)
+    opener = build_opener(GitHubRedirectHandler(app, asset))
+    return opener.open(Request(url, headers=headers), timeout=90)
 
-def download(url, path, token=None):
+def download(url, path, app, asset):
     digest = hashlib.sha256()
-    with fetch(url, token) as response, open(path, "wb") as out:
+    with fetch(url, app, asset=asset) as response, open(path, "wb") as out:
         while chunk := response.read(1024 * 1024):
             out.write(chunk)
             digest.update(chunk)
@@ -33,7 +82,7 @@ def sync(root, token=None):
     existing = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest = dict(existing)
     for app in APPS:
-        release = json.load(fetch(API.format(app), token))
+        release = json.load(fetch(API.format(app), app, token))
         assets = release.get("assets", [])
         msi = next((a for a in assets if re.fullmatch(rf"{app}-.*-windows-x64\.msi", a["name"], re.I)), None)
         checksums = next((a for a in assets if a["name"] == "SHA256SUMS.txt"), None)
@@ -48,7 +97,7 @@ def sync(root, token=None):
         with tempfile.TemporaryDirectory(dir=root) as temp:
             temp = Path(temp)
             checksum_path = temp / "SHA256SUMS.txt"
-            download(checksums["browser_download_url"], checksum_path)
+            download(checksums["browser_download_url"], checksum_path, app, "SHA256SUMS.txt")
             sums = checksum_path.read_text(encoding="utf-8")
             matches = [line for line in sums.splitlines() if line.strip().endswith(msi["name"])]
             if len(matches) != 1:
@@ -57,7 +106,7 @@ def sync(root, token=None):
             if not re.fullmatch(r"[a-f0-9]{64}", expected):
                 raise RuntimeError(f"{app}: invalid SHA256 entry")
             staged = temp / msi["name"]
-            actual = download(msi["browser_download_url"], staged)
+            actual = download(msi["browser_download_url"], staged, app, msi["name"])
             if actual != expected or (msi.get("digest") and msi["digest"].lower() != "sha256:" + actual):
                 raise RuntimeError(f"{app}: checksum mismatch, existing installer preserved")
             os.replace(staged, target)
