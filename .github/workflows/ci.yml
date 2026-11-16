@@ -39,13 +39,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t files < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' | sort)
+          mapfile -t files < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
           test "${#files[@]}" -gt 0
           for file in "${files[@]}"; do
-            [[ "$file" =~ ^[0-9]{14}_.+\\.sql$ ]]
+            [[ "$file" =~ ^[0-9]{14}_.+\.sql$ ]]
           done
-          versions="$(printf '%s\\n' "${files[@]}" | cut -c1-14)"
-          test "$(printf '%s\\n' "$versions" | sort -u | wc -l)" -eq "${#files[@]}"
+          versions="$(printf '%s\n' "${files[@]}" | cut -c1-14)"
+          test "$(printf '%s\n' "$versions" | sort -u | wc -l)" -eq "${#files[@]}"
 
       - name: Reject deployment-specific Supabase project IDs
         shell: bash
@@ -70,8 +70,8 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
-          --timeout 5s
-          --retries 5
+          --health-timeout 10s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
