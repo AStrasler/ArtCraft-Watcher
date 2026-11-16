@@ -27,11 +27,12 @@ def _allowed_github_url(url, app, asset=None, allow_asset_host=False):
     if parsed.fragment:
         return False
     if parsed.hostname == "api.github.com":
-        return asset is None and parsed.path == f"/repos/storytold/{app}/releases/latest"
+        return asset is None and not parsed.query and parsed.path == f"/repos/storytold/{app}/releases/latest"
     if parsed.hostname == "github.com":
         parts = parsed.path.split("/")
         return (
             asset is not None
+            and not parsed.query
             and len(parts) == 7
             and parts[1:4] == ["storytold", app, "releases"]
             and parts[4] == "download"
