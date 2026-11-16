@@ -18,6 +18,9 @@ jobs:
       - name: Test installer URL and redirect security
         run: python3 -m unittest discover -s tests -p 'test_installer_sync.py'
 
+      - name: Test installer URL and redirect security
+        run: python3 -m unittest discover -s tests -p 'test_installer_sync.py'
+
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
